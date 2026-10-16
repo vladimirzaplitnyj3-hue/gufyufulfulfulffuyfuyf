@@ -1,7 +1,7 @@
 # ============================================================
-# KRANZAYY | METRO SHOP BOT — v24 FINAL
-# Без edit-ов. Только sendMessage + deleteMessage.
-# Только premium-эмодзи. Кнопки рабочие.
+# KRANZAYY | METRO SHOP BOT — v25 COLORED
+# Цветные кнопки + premium-эмодзи в кнопках (для Telegram Business)
+# Авто-фолбэк на серые кнопки, если Business не подключён
 # ============================================================
 
 import requests, json, time, logging, sys, traceback, re
@@ -30,8 +30,11 @@ PAY_LINK_NORMAL = "https://t.me/Manager_Kranzayy"
 PAY_LINK_USI = "https://t.me/Manager_Kranzayy"
 MAX_PARTICIPANTS = 4
 
+# Цвета кнопок: "success" (зелёный), "danger" (красный), "primary" (голубой)
+USE_COLORED_BUTTONS = True   # если Business не подключён — оставь True, сработает авто-фолбэк
+
 # ============================================================
-# PREMIUM-ЭМОДЗИ (только для текстов)
+# PREMIUM-ЭМОДЗИ
 # ============================================================
 E_MENU    = "5231235536206730707"
 E_SHOP    = "5278702045883292456"
@@ -77,6 +80,24 @@ def strip_html(t):
     return re.sub(r'<[^>]+>', '', t)
 
 # ============================================================
+# КНОПКИ-ХЕЛПЕРЫ
+# ============================================================
+def btn(text, callback_data=None, url=None, color=None, emoji_id=None):
+    """
+    Собирает кнопку.
+    color: 'success' | 'danger' | 'primary' | None
+    emoji_id: premium emoji id для иконки в кнопке
+    Если USE_COLORED_BUTTONS=False — поля style/icon не добавляются.
+    """
+    b = {"text": text}
+    if callback_data: b["callback_data"] = callback_data
+    if url: b["url"] = url
+    if USE_COLORED_BUTTONS:
+        if color: b["style"] = color
+        if emoji_id: b["icon_custom_emoji_id"] = emoji_id
+    return b
+
+# ============================================================
 # API
 # ============================================================
 def api(method, payload, retries=2):
@@ -95,26 +116,59 @@ def api(method, payload, retries=2):
                 return {"ok": False, "error": str(e)}
     return {"ok": False}
 
-def send(chat_id, text, kb=None):
-    p = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+def _send_raw(chat_id, text, kb, parse_mode="HTML"):
+    p = {"chat_id": chat_id, "text": text}
+    if parse_mode: p["parse_mode"] = parse_mode
     if kb: p["reply_markup"] = json.dumps(kb)
-    r = api("sendMessage", p)
+    return api("sendMessage", p)
+
+def send(chat_id, text, kb=None):
+    # 1) с HTML и premium
+    r = _send_raw(chat_id, text, kb, "HTML")
     if r.get("ok"): return r
-    p2 = {"chat_id": chat_id, "text": strip_html(text)}
-    if kb: p2["reply_markup"] = json.dumps(kb)
-    return api("sendMessage", p2)
+    # 2) если упало из-за цветов кнопок — пересобираем без них
+    if kb and USE_COLORED_BUTTONS:
+        kb_plain = strip_colors(kb)
+        r2 = _send_raw(chat_id, text, kb_plain, "HTML")
+        if r2.get("ok"): return r2
+        kb = kb_plain
+    # 3) без HTML
+    r3 = _send_raw(chat_id, strip_html(text), kb, None)
+    return r3
+
+def _send_photo_raw(chat_id, photo, caption, kb, parse_mode="HTML"):
+    p = {"chat_id": chat_id, "photo": photo}
+    if caption: p["caption"] = caption
+    if parse_mode: p["parse_mode"] = parse_mode
+    if kb: p["reply_markup"] = json.dumps(kb)
+    return api("sendPhoto", p)
 
 def send_photo(chat_id, photo, caption=None, kb=None):
-    p = {"chat_id": chat_id, "photo": photo, "parse_mode": "HTML"}
-    if caption: p["caption"] = caption
-    if kb: p["reply_markup"] = json.dumps(kb)
-    r = api("sendPhoto", p)
+    r = _send_photo_raw(chat_id, photo, caption, kb, "HTML")
     if r.get("ok"): return r
+    if kb and USE_COLORED_BUTTONS:
+        kb_plain = strip_colors(kb)
+        r2 = _send_photo_raw(chat_id, photo, caption, kb_plain, "HTML")
+        if r2.get("ok"): return r2
+        kb = kb_plain
     if caption:
-        p2 = {"chat_id": chat_id, "photo": photo, "caption": strip_html(caption)}
-        if kb: p2["reply_markup"] = json.dumps(kb)
-        return api("sendPhoto", p2)
+        r3 = _send_photo_raw(chat_id, photo, strip_html(caption), kb, None)
+        return r3
     return r
+
+def strip_colors(kb):
+    """Копия клавиатуры без style/icon_custom_emoji_id."""
+    try:
+        out = {"inline_keyboard": []}
+        for row in kb.get("inline_keyboard", []):
+            newrow = []
+            for b in row:
+                nb = {k: v for k, v in b.items() if k not in ("style", "icon_custom_emoji_id")}
+                newrow.append(nb)
+            out["inline_keyboard"].append(newrow)
+        return out
+    except:
+        return kb
 
 def answer_cb(cb_id, text=None, alert=False):
     p = {"callback_query_id": cb_id}
@@ -151,9 +205,7 @@ def clear_last(uid):
     if s in user_data: user_data[s]["last_msg_id"] = None
 
 def replace_screen(chat_id, old_msg_id, text, kb=None, photo=None, caption=None):
-    """Удаляет старое сообщение и отправляет новое. Без edit."""
-    if old_msg_id:
-        del_msg(chat_id, old_msg_id)
+    if old_msg_id: del_msg(chat_id, old_msg_id)
     if photo:
         r = send_photo(chat_id, photo, caption=caption or text, kb=kb)
     else:
@@ -186,62 +238,69 @@ def queue_info(k, uid):
     return 0, 0, len(p) + len(n)
 
 # ============================================================
-# КЛАВИАТУРЫ
+# КЛАВИАТУРЫ С ЦВЕТАМИ И PREMIUM-ЭМОДЗИ
 # ============================================================
 
 def main_menu():
     return {"inline_keyboard": [
-        [{"text": "СОПРОВОЖДЕНИЯ", "callback_data": "menu_support"}],
-        [{"text": "КОМПЛЕКТЫ", "callback_data": "menu_kits"},
-         {"text": "СКУПКА ЛУТА", "callback_data": "menu_loot"}],
-        [{"text": "БУСТ БАЛАНСА", "callback_data": "menu_boost"}],
-        [{"text": "БАБОЧКИ (ниже рынка)", "callback_data": "menu_butterfly"}],
-        [{"text": "РЕГЛАМЕНТ", "url": "https://t.me/+MU3bQoEK9rUxYTIy"},
-         {"text": "НИШТЯКИ", "url": "https://t.me/kranzayy_nustaku"}],
-        [{"text": "Отзывы", "url": "https://t.me/kranzayy_OTZ"}],
+        [btn("СОПРОВОЖДЕНИЯ", callback_data="menu_support", color="success", emoji_id=E_CHECK)],
+        [btn("КОМПЛЕКТЫ", callback_data="menu_kits", color="primary", emoji_id=E_BOX),
+         btn("СКУПКА ЛУТА", callback_data="menu_loot", color="primary", emoji_id=E_BAG)],
+        [btn("БУСТ БАЛАНСА", callback_data="menu_boost", color="success", emoji_id=E_ROCKET)],
+        [btn("БАБОЧКИ (ниже рынка)", callback_data="menu_butterfly", color="primary", emoji_id=E_DIAMOND)],
+        [btn("РЕГЛАМЕНТ", url="https://t.me/+MU3bQoEK9rUxYTIy", color="danger", emoji_id=E_LOCK),
+         btn("НИШТЯКИ", url="https://t.me/kranzayy_nustaku", color="success", emoji_id=E_DIAMOND)],
+        [btn("Отзывы", url="https://t.me/kranzayy_OTZ", color="primary", emoji_id=E_HEART)],
     ]}
 
 SUPPORT_LIST = [
-    ("default",       "10кк | Дефолт (7 карта) — 100₽"),
-    ("vip",           "15кк | Вип (7 карта) — 150₽"),
-    ("elite",         "21кк | Элит (7 карта) — 290₽"),
-    ("oligarch",      "35кк | Олигарх (7 карта) — 359₽"),
-    ("default_plus",  "10кк | Дефолт+ (7 карта) — 150₽"),
-    ("vip_plus",      "15кк | Вип+ (7 карта) — 210₽"),
-    ("elite_plus",    "21кк | Элит+ (7 карта) — 290₽"),
-    ("oligarch_plus", "35кк | Олигарх+ (7 карта) — 425₽"),
-    ("default_pro",   "10кк | Дефолт ПРО (7 карта) — 225₽"),
-    ("vip_pro",       "15кк | Вип ПРО (7 карта) — 289₽"),
-    ("elite_pro",     "21кк | Элит ПРО (7 карта) — 369₽"),
-    ("oligarch_pro",  "35кк | Олигарх ПРО (7 карта) — 529₽"),
+    ("default",       "10кк | Дефолт (7 карта) — 100₽",  "success", E_CHECK),
+    ("vip",           "15кк | Вип (7 карта) — 150₽",      "success", E_CHECK),
+    ("elite",         "21кк | Элит (7 карта) — 290₽",     "success", E_CROWN),
+    ("oligarch",      "35кк | Олигарх (7 карта) — 359₽",  "success", E_CROWN),
+    ("default_plus",  "10кк | Дефолт+ (7 карта) — 150₽",  "primary", E_STAR),
+    ("vip_plus",      "15кк | Вип+ (7 карта) — 210₽",     "primary", E_STAR),
+    ("elite_plus",    "21кк | Элит+ (7 карта) — 290₽",    "primary", E_STAR2),
+    ("oligarch_plus", "35кк | Олигарх+ (7 карта) — 425₽", "primary", E_STAR3),
+    ("default_pro",   "10кк | Дефолт ПРО (7 карта) — 225₽","danger", E_ROCKET),
+    ("vip_pro",       "15кк | Вип ПРО (7 карта) — 289₽",   "danger", E_ROCKET),
+    ("elite_pro",     "21кк | Элит ПРО (7 карта) — 369₽",  "danger", E_ROCKET),
+    ("oligarch_pro",  "35кк | Олигарх ПРО (7 карта) — 529₽","danger", E_CROWN),
 ]
 
 def support_menu():
-    kb = [[{"text": t, "callback_data": f"sup_{k}"}] for k, t in SUPPORT_LIST]
-    kb.append([{"text": "Назад", "callback_data": "back_main"}])
+    kb = [[btn(t, callback_data=f"sup_{k}", color=c, emoji_id=e)] for k, t, c, e in SUPPORT_LIST]
+    kb.append([btn("Назад", callback_data="back_main", color="danger", emoji_id=E_CROSS)])
     return {"inline_keyboard": kb}
 
 BOOST_LIST = [
-    ("5.000.000", 85),
-    ("10.000.000", 145),
-    ("15.000.000", 250),
-    ("20.000.000", 310),
-    ("25.000.000", 390),
-    ("35.000.000", 560),
-    ("50.000.000", 790),
-    ("75.000.000", 1190),
-    ("100.000.000", 1590),
+    ("5.000.000", 85, "success", E_MONEY),
+    ("10.000.000", 145, "success", E_MONEY),
+    ("15.000.000", 250, "primary", E_PRICE),
+    ("20.000.000", 310, "primary", E_PRICE),
+    ("25.000.000", 390, "primary", E_PRICE),
+    ("35.000.000", 560, "danger", E_DIAMOND),
+    ("50.000.000", 790, "danger", E_DIAMOND),
+    ("75.000.000", 1190, "danger", E_CROWN),
+    ("100.000.000", 1590, "danger", E_CROWN),
 ]
 
 def boost_menu():
-    kb = [[{"text": f"{a} — {p}₽", "callback_data": f"boost_{a}"}] for a, p in BOOST_LIST]
-    kb.append([{"text": "Назад", "callback_data": "back_main"}])
+    kb = [[btn(f"{a} — {p}₽", callback_data=f"boost_{a}", color=c, emoji_id=e)]
+          for a, p, c, e in BOOST_LIST]
+    kb.append([btn("Назад", callback_data="back_main", color="danger", emoji_id=E_CROSS)])
     return {"inline_keyboard": kb}
 
 BUTTERFLY_LIST = [
-    ("butterfly_dup", "Бабочка (дубликат) — 900₽"),
-    ("butterfly_org", "Бабочка (оригинал) — 1200₽"),
+    ("butterfly_dup", "Бабочка (дубликат) — 900₽",  "primary", E_DIAMOND),
+    ("butterfly_org", "Бабочка (оригинал) — 1200₽", "success", E_CROWN),
 ]
+
+def butterfly_menu():
+    kb = [[btn(t, callback_data=f"bf_{k}", color=c, emoji_id=e)] for k, t, c, e in BUTTERFLY_LIST]
+    kb.append([btn("ЮСИ (актуальные цены)", callback_data="usi_menu", color="primary", emoji_id=E_DIAMOND)])
+    kb.append([btn("Назад", callback_data="back_main", color="danger", emoji_id=E_CROSS)])
+    return {"inline_keyboard": kb}
 
 USI_LIST = [
     ("60",   80),
@@ -252,65 +311,60 @@ USI_LIST = [
     ("1800", 2150),
 ]
 
-def butterfly_menu():
-    kb = [[{"text": t, "callback_data": f"bf_{k}"}] for k, t in BUTTERFLY_LIST]
-    kb.append([{"text": "ЮСИ (актуальные цены)", "callback_data": "usi_menu"}])
-    kb.append([{"text": "Назад", "callback_data": "back_main"}])
-    return {"inline_keyboard": kb}
-
 def usi_menu():
-    kb = [[{"text": f"{u} юси — {p}₽", "callback_data": f"usi_{u}"}] for u, p in USI_LIST]
-    kb.append([{"text": "Назад", "callback_data": "menu_butterfly"}])
+    kb = [[btn(f"{u} юси — {p}₽", callback_data=f"usi_{u}", color="primary", emoji_id=E_DIAMOND)]
+          for u, p in USI_LIST]
+    kb.append([btn("Назад", callback_data="menu_butterfly", color="danger", emoji_id=E_CROSS)])
     return {"inline_keyboard": kb}
 
 def back_btn(cb="back_main"):
-    return {"inline_keyboard": [[{"text": "Назад", "callback_data": cb}]]}
+    return {"inline_keyboard": [[btn("Назад", callback_data=cb, color="danger", emoji_id=E_CROSS)]]}
 
 def method_menu(pid):
     return {"inline_keyboard": [
-        [{"text": "Обычная покупка", "callback_data": f"method_normal_{pid}"}],
-        [{"text": "Приоритет в очереди (+100₽)", "callback_data": f"method_priority_{pid}"}],
-        [{"text": "Отмена", "callback_data": f"cancel_{pid}"}],
+        [btn("Обычная покупка", callback_data=f"method_normal_{pid}", color="primary", emoji_id=E_BOX)],
+        [btn("Приоритет в очереди (+100₽)", callback_data=f"method_priority_{pid}", color="success", emoji_id=E_ROCKET)],
+        [btn("Отмена", callback_data=f"cancel_{pid}", color="danger", emoji_id=E_CROSS)],
     ]}
 
 def priority_menu(pid):
     return {"inline_keyboard": [
-        [{"text": "Оплатить приоритет (+100₽)", "url": PAY_LINK_PRIORITY}],
-        [{"text": "Что такое приоритет в очереди?", "callback_data": f"what_priority_{pid}"}],
-        [{"text": "Отмена", "callback_data": f"cancel_{pid}"}],
+        [btn("Оплатить приоритет (+100₽)", url=PAY_LINK_PRIORITY, color="success", emoji_id=E_MONEY)],
+        [btn("Что такое приоритет в очереди?", callback_data=f"what_priority_{pid}", color="primary", emoji_id=E_INFO)],
+        [btn("Отмена", callback_data=f"cancel_{pid}", color="danger", emoji_id=E_CROSS)],
     ]}
 
 def normal_pay_menu(pid):
     return {"inline_keyboard": [
-        [{"text": "Оплатить", "url": PAY_LINK_NORMAL}],
-        [{"text": "Отмена", "callback_data": f"cancel_{pid}"}],
+        [btn("Оплатить", url=PAY_LINK_NORMAL, color="success", emoji_id=E_MONEY)],
+        [btn("Отмена", callback_data=f"cancel_{pid}", color="danger", emoji_id=E_CROSS)],
     ]}
 
 def after_prio_menu(pid):
     return {"inline_keyboard": [
-        [{"text": "Купить сопровождение", "callback_data": "menu_support"}],
-        [{"text": "Посмотреть очередь", "callback_data": f"view_queue_{pid}"}],
-        [{"text": "Написать", "url": MANAGER_LINK}],
-        [{"text": "Ждать", "callback_data": f"wait_{pid}"}],
+        [btn("Купить сопровождение", callback_data="menu_support", color="success", emoji_id=E_SHOP)],
+        [btn("Посмотреть очередь", callback_data=f"view_queue_{pid}", color="primary", emoji_id=E_INFO)],
+        [btn("Написать", url=MANAGER_LINK, color="success", emoji_id=E_USER)],
+        [btn("Ждать", callback_data=f"wait_{pid}", color="danger", emoji_id=E_TIME)],
     ]}
 
 def after_norm_menu(pid):
     return {"inline_keyboard": [
-        [{"text": "Купить Приоритет (+100₽)", "callback_data": f"method_priority_{pid}"}],
-        [{"text": "Написать", "url": MANAGER_LINK}],
-        [{"text": "Ждать", "callback_data": f"wait_{pid}"}],
+        [btn("Купить Приоритет (+100₽)", callback_data=f"method_priority_{pid}", color="success", emoji_id=E_ROCKET)],
+        [btn("Написать", url=MANAGER_LINK, color="success", emoji_id=E_USER)],
+        [btn("Ждать", callback_data=f"wait_{pid}", color="danger", emoji_id=E_TIME)],
     ]}
 
 def owner_team_free(pid):
     return {"inline_keyboard": [
-        [{"text": "Команда свободна", "callback_data": f"team_free_{pid}"}],
-        [{"text": "Заказ выполнен", "callback_data": f"done_yes_{pid}"}],
-        [{"text": "Не выполнен", "callback_data": f"done_no_{pid}"}],
+        [btn("Команда свободна", callback_data=f"team_free_{pid}", color="success", emoji_id=E_CHECK)],
+        [btn("Заказ выполнен", callback_data=f"done_yes_{pid}", color="success", emoji_id=E_CHECK)],
+        [btn("Не выполнен", callback_data=f"done_no_{pid}", color="danger", emoji_id=E_CROSS)],
     ]}
 
 def group_join(pid):
     return {"inline_keyboard": [
-        [{"text": "Я участвую в сопровождении", "callback_data": f"join_{pid}"}]
+        [btn("Я участвую в сопровождении", callback_data=f"join_{pid}", color="success", emoji_id=E_USER)]
     ]}
 
 # ============================================================
@@ -385,7 +439,7 @@ BUTTERFLY_PRICES = {
 }
 
 # ============================================================
-# ЭКРАНЫ (только send + delete, никаких edit)
+# ЭКРАНЫ
 # ============================================================
 def screen_main(chat_id, old_msg_id=None):
     global PHOTO_FILE_ID
@@ -557,8 +611,6 @@ def handle_cb(cb):
     msg_id = cb.get("message", {}).get("message_id")
 
     try:
-        # всегда отвечаем на callback сразу, чтобы не «залипала» кнопка
-        # (для навигационных — короткий тост; для остальных — тихо)
         nav_toasts = {
             "back_main": "Меню",
             "menu_support": "Сопровождения",
@@ -571,29 +623,21 @@ def handle_cb(cb):
         if data in nav_toasts:
             answer_cb(cb_id, nav_toasts[data])
 
-        # --- навигация ---
         if data == "back_main":
             screen_main(chat_id, msg_id); return
-
         if data == "menu_support":
             screen_support(chat_id, msg_id); return
-
         if data == "menu_kits":
             screen_kits(chat_id, msg_id); return
-
         if data == "menu_loot":
             screen_loot(chat_id, msg_id); return
-
         if data == "menu_boost":
             screen_boost(chat_id, msg_id); return
-
         if data == "menu_butterfly":
             screen_butterfly(chat_id, msg_id); return
-
         if data == "usi_menu":
             screen_usi(chat_id, msg_id); return
 
-        # --- ЮСИ ---
         if data.startswith("usi_"):
             u = data[len("usi_"):]
             for amt, price in USI_LIST:
@@ -603,7 +647,6 @@ def handle_cb(cb):
                     return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- Бабочки ---
         if data.startswith("bf_"):
             k = data[len("bf_"):]
             if k in BUTTERFLY_PRICES:
@@ -613,7 +656,6 @@ def handle_cb(cb):
                 return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- Сопровождение ---
         if data.startswith("sup_"):
             k = data[len("sup_"):]
             if k in SUP_PRICES:
@@ -622,17 +664,15 @@ def handle_cb(cb):
                 return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- Буст ---
         if data.startswith("boost_"):
             amt = data[len("boost_"):]
-            for a, p in BOOST_LIST:
+            for a, p, _, _ in BOOST_LIST:
                 if a == amt:
                     answer_cb(cb_id, f"Буст {amt}")
                     screen_method(chat_id, msg_id, "boost", amt, f"Буст на {amt}", p)
                     return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- Метод ---
         if data.startswith("method_normal_"):
             pid = data[len("method_normal_"):]
             answer_cb(cb_id, "Обычная покупка")
@@ -672,7 +712,6 @@ def handle_cb(cb):
             answer_cb(cb_id, "Отменено")
             screen_main(chat_id, msg_id); return
 
-        # --- Админ ---
         if data.startswith("owner_yes_"):
             pid = data[len("owner_yes_"):]; o = orders.get(pid)
             if not o:
@@ -733,7 +772,6 @@ def handle_cb(cb):
             if uname in parts:
                 answer_cb(cb_id, "Вы уже участвуете", True); return
             parts.append(uname)
-            # в группе правим только сообщение-сопровождение (там текст, не фото)
             if msg_id:
                 gtext = group_text(pid)
                 p = {"chat_id": GROUP_ID, "message_id": msg_id, "text": gtext,
@@ -746,7 +784,6 @@ def handle_cb(cb):
                     api("editMessageText", p2)
             answer_cb(cb_id, "Вы участвуете!"); return
 
-        # неизвестный callback
         answer_cb(cb_id)
 
     except Exception as e:
@@ -818,7 +855,7 @@ def handle_msg(msg):
 # MAIN LOOP
 # ============================================================
 def main():
-    logger.info("BOT v24 ЗАПУЩЕН — навигация через send+delete, кнопки без style/icon")
+    logger.info("BOT v25 COLORED ЗАПУЩЕН — цветные кнопки + авто-фолбэк")
     offset = 0
     while True:
         try:
