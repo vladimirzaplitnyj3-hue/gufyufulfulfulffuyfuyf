@@ -1,5 +1,7 @@
 # ============================================================
-# KRANZAYY | METRO SHOP BOT — v21 (PREMIUM-ONLY + BUTTERFLY)
+# KRANZAYY | METRO SHOP BOT — v23 FINAL
+# Кнопки: sendMessage + deleteMessage (без edit)
+# Эмодзи: только premium в текстах
 # ============================================================
 
 import requests, json, time, logging, sys, traceback, re
@@ -29,7 +31,7 @@ PAY_LINK_USI = "https://t.me/Manager_Kranzayy"
 MAX_PARTICIPANTS = 4
 
 # ============================================================
-# PREMIUM-ЭМОДЗИ (только для текста)
+# PREMIUM-ЭМОДЗИ
 # ============================================================
 E_MENU    = "5231235536206730707"
 E_SHOP    = "5278702045883292456"
@@ -51,8 +53,6 @@ E_BOX     = "5429424809215797643"
 E_ROCKET  = "5474525938668550110"
 E_CROWN   = "5465556444931718975"
 E_LOCK    = "5316970857325687050"
-E_BUTTERFLY = "5330051403563943171"   # fallback emoji для бабочки
-E_FIRE    = "5474525938668550110"
 
 # ============================================================
 # ХРАНИЛИЩА
@@ -100,6 +100,7 @@ def send(chat_id, text, kb=None):
     if kb: p["reply_markup"] = json.dumps(kb)
     r = api("sendMessage", p)
     if r.get("ok"): return r
+    # fallback: без HTML (если premium emoji не поддерживаются чатом)
     p2 = {"chat_id": chat_id, "text": strip_html(text)}
     if kb: p2["reply_markup"] = json.dumps(kb)
     return api("sendMessage", p2)
@@ -116,15 +117,6 @@ def send_photo(chat_id, photo, caption=None, kb=None):
         return api("sendPhoto", p2)
     return r
 
-def edit(chat_id, msg_id, text, kb=None):
-    p = {"chat_id": chat_id, "message_id": msg_id, "text": text, "parse_mode": "HTML"}
-    if kb: p["reply_markup"] = json.dumps(kb)
-    r = api("editMessageText", p)
-    if r.get("ok"): return r
-    p2 = {"chat_id": chat_id, "message_id": msg_id, "text": strip_html(text)}
-    if kb: p2["reply_markup"] = json.dumps(kb)
-    return api("editMessageText", p2)
-
 def answer_cb(cb_id, text=None, alert=False):
     p = {"callback_query_id": cb_id}
     if text: p["text"] = text
@@ -132,6 +124,7 @@ def answer_cb(cb_id, text=None, alert=False):
     return api("answerCallbackQuery", p)
 
 def del_msg(chat_id, msg_id):
+    if not msg_id: return
     return api("deleteMessage", {"chat_id": chat_id, "message_id": msg_id})
 
 def get_username(chat_id):
@@ -148,14 +141,22 @@ def gen_pid():
     return f"ORD{int(time.time())}_{orders_counter[0]}"
 
 def remember(uid, mid):
-    s = str(uid)
-    user_data.setdefault(s, {})["last_msg_id"] = mid
+    user_data.setdefault(str(uid), {})["last_msg_id"] = mid
 
 def clear_last(uid):
     s = str(uid)
     lid = user_data.get(s, {}).get("last_msg_id")
     if lid: del_msg(uid, lid)
     if s in user_data: user_data[s]["last_msg_id"] = None
+
+def replace_screen(chat_id, msg_id, text, kb=None):
+    """Удаляет старое сообщение и отправляет новое — вместо edit."""
+    if msg_id:
+        del_msg(chat_id, msg_id)
+    r = send(chat_id, text, kb)
+    if r.get("ok"):
+        remember(chat_id, r["result"]["message_id"])
+    return r
 
 # ============================================================
 # ОЧЕРЕДЬ
@@ -181,7 +182,7 @@ def queue_info(k, uid):
     return 0, 0, len(p) + len(n)
 
 # ============================================================
-# КЛАВИАТУРЫ (без эмодзи — только текст, чтобы точно работало)
+# КЛАВИАТУРЫ (чистый текст, без style/icon — иначе Telegram ломает reply_markup)
 # ============================================================
 
 def main_menu():
@@ -233,7 +234,6 @@ def boost_menu():
     kb.append([{"text": "Назад", "callback_data": "back_main"}])
     return {"inline_keyboard": kb}
 
-# ---------- БАБОЧКИ ----------
 BUTTERFLY_LIST = [
     ("butterfly_dup", "Бабочка (дубликат) — 900₽"),
     ("butterfly_org", "Бабочка (оригинал) — 1200₽"),
@@ -297,19 +297,6 @@ def after_norm_menu(pid):
         [{"text": "Ждать", "callback_data": f"wait_{pid}"}],
     ]}
 
-def owner_confirm_menu(pid):
-    return {"inline_keyboard": [
-        [{"text": "Да, деньги пришли", "callback_data": f"owner_yes_{pid}"}],
-        [{"text": "Нет, отменить", "callback_data": f"owner_no_{pid}"}],
-    ]}
-
-def owner_qr_menu(pid):
-    return {"inline_keyboard": [
-        [{"text": "Отправить QR-код", "callback_data": f"send_qr_{pid}"}],
-        [{"text": "Заказ выполнен", "callback_data": f"done_yes_{pid}"}],
-        [{"text": "Не выполнен", "callback_data": f"done_no_{pid}"}],
-    ]}
-
 def owner_team_free(pid):
     return {"inline_keyboard": [
         [{"text": "Команда свободна", "callback_data": f"team_free_{pid}"}],
@@ -353,7 +340,7 @@ LOOT_TEXT = (
 )
 
 BUTTERFLY_TEXT = (
-    f'{em(E_BUTTERFLY)} <b>БАБОЧКИ — ЦЕНЫ НИЖЕ РЫНКА</b>\n\n'
+    f'{em(E_DIAMOND)} <b>БАБОЧКИ — ЦЕНЫ НИЖЕ РЫНКА</b>\n\n'
     f'{em(E_DIAMOND)} Бабочка (дубликат) — <b>900₽</b>\n'
     f'{em(E_CROWN)} Бабочка (оригинал) — <b>1200₽</b>\n\n'
     f'{em(E_MONEY)} Оплата — как на сопровождениях или ЮСИ\n\n'
@@ -394,9 +381,43 @@ BUTTERFLY_PRICES = {
 }
 
 # ============================================================
-# ЛОГИКА ПОКУПКИ
+# ЭКРАНЫ
 # ============================================================
-def show_method(chat_id, itype, ikey, iname, price):
+def screen_main(chat_id, msg_id=None):
+    global PHOTO_FILE_ID
+    if msg_id: del_msg(chat_id, msg_id)
+    clear_last(chat_id)
+    r = send_photo(chat_id, PHOTO_FILE_ID or PHOTO_URL, caption=MAIN_CAPTION, kb=main_menu())
+    if r.get("ok"):
+        if not PHOTO_FILE_ID:
+            try: PHOTO_FILE_ID = r["result"]["photo"][-1]["file_id"]
+            except: pass
+        remember(chat_id, r["result"]["message_id"])
+    else:
+        r2 = send(chat_id, MAIN_CAPTION, main_menu())
+        if r2.get("ok"): remember(chat_id, r2["result"]["message_id"])
+
+def screen_support(chat_id, msg_id):
+    text = f'{em(E_SHOP)} <b>СОПРОВОЖДЕНИЯ</b>\n\n{em(E_INFO)} Выберите вариант:\n\n{stars_row()}'
+    replace_screen(chat_id, msg_id, text, support_menu())
+
+def screen_kits(chat_id, msg_id):
+    replace_screen(chat_id, msg_id, KITS_TEXT, back_btn())
+
+def screen_loot(chat_id, msg_id):
+    replace_screen(chat_id, msg_id, LOOT_TEXT, back_btn())
+
+def screen_boost(chat_id, msg_id):
+    text = f'{em(E_ROCKET)} <b>БУСТ БАЛАНСА</b>\n\n{em(E_INFO)} Выберите сумму:\n\n{stars_row()}'
+    replace_screen(chat_id, msg_id, text, boost_menu())
+
+def screen_butterfly(chat_id, msg_id):
+    replace_screen(chat_id, msg_id, BUTTERFLY_TEXT, butterfly_menu())
+
+def screen_usi(chat_id, msg_id):
+    replace_screen(chat_id, msg_id, USI_TEXT, usi_menu())
+
+def screen_method(chat_id, msg_id, itype, ikey, iname, price):
     clear_last(chat_id)
     pid = gen_pid()
     orders[pid] = {"user_id": chat_id, "type": itype, "item_key": ikey,
@@ -409,13 +430,12 @@ def show_method(chat_id, itype, ikey, iname, price):
         f'{em(E_INFO)} Выберите как вы хотите купить, ниже {em(E_CHECK)}\n\n'
         f'{stars_row()}'
     )
-    r = send(chat_id, text, method_menu(pid))
-    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
+    replace_screen(chat_id, msg_id, text, method_menu(pid))
     return pid
 
-def on_priority_choice(chat_id, cb_id, pid):
+def screen_priority(chat_id, msg_id, pid):
     o = orders.get(pid)
-    if not o: return answer_cb(cb_id, "Заказ не найден", True)
+    if not o: return
     o["status"] = "choosing_priority"
     o["priority"] = True
     text = (
@@ -426,14 +446,11 @@ def on_priority_choice(chat_id, cb_id, pid):
         f'{em(E_INFO)} Выберите действие\n\n'
         f'{stars_row()}'
     )
-    clear_last(chat_id)
-    r = send(chat_id, text, priority_menu(pid))
-    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
-    answer_cb(cb_id, "Приоритет выбран")
+    replace_screen(chat_id, msg_id, text, priority_menu(pid))
 
-def on_normal_choice(chat_id, cb_id, pid):
+def screen_normal(chat_id, msg_id, pid):
     o = orders.get(pid)
-    if not o: return answer_cb(cb_id, "Заказ не найден", True)
+    if not o: return
     o["status"] = "choosing_normal"
     o["priority"] = False
     text = (
@@ -442,70 +459,19 @@ def on_normal_choice(chat_id, cb_id, pid):
         f'{em(E_PRICE)} Цена: <b>{o["base_price"]}₽</b>\n\n'
         f'{stars_row()}'
     )
-    clear_last(chat_id)
-    r = send(chat_id, text, normal_pay_menu(pid))
-    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
-    answer_cb(cb_id, "Обычная покупка")
+    replace_screen(chat_id, msg_id, text, normal_pay_menu(pid))
 
-def on_priority_paid(chat_id, pid):
-    o = orders.get(pid)
-    if not o: return
-    o["status"] = "priority_paid"
-    o["priority"] = True
-    o["total_price"] = o["base_price"] + 100
-    uname = get_username(chat_id)
-    add_prio(o["item_key"], chat_id, uname)
-    before, after, total = queue_info(o["item_key"], chat_id)
-
-    send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
+def screen_what_priority(chat_id, msg_id, pid):
     text = (
-        f'{em(E_STAR2)} <b>Вы оплатили «Приоритет в очереди»</b>\n\n'
-        f'{em(E_INFO)} Текущая очередь: перед вами — \n'
-        f'<b>{before}</b> человек, которые первые приобрели «приоритет»\n\n'
-        f'После вас — <b>{after}</b> человек, которые после вас приобрели «приоритет»\n\n'
-        f'{em(E_USER)} Вам напишет человек, когда вы станете первые в очереди {em(E_STAR2)}\n'
-        f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
+        f'{em(E_INFO)} <b>ЧТО ТАКОЕ ПРИОРИТЕТ?</b>\n\n'
+        f'{em(E_ROCKET)} Возможность получить сопровождение <b>вне очереди</b>!\n\n'
+        f'{em(E_CHECK)} Вы будете одними из первых.\n'
+        f'{em(E_MONEY)} Доп. плата: <b>+100₽</b>\n\n'
+        f'{stars_row()}'
     )
-    clear_last(chat_id)
-    r = send(chat_id, text, after_prio_menu(pid))
-    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
+    replace_screen(chat_id, msg_id, text, priority_menu(pid))
 
-    send(OWNER_ID,
-        f'{em(E_ROCKET)} <b>НОВЫЙ ПРИОРИТЕТ!</b>\n\n'
-        f'{em(E_USER)} @{uname}\n'
-        f'{em(E_SHOP)} {o["item_name"]}\n'
-        f'{em(E_PRICE)} {o["total_price"]}₽\n'
-        f'{em(E_INFO)} Перед — {before}, после — {after}')
-
-def on_normal_paid(chat_id, pid):
-    o = orders.get(pid)
-    if not o: return
-    o["status"] = "normal_paid"
-    o["priority"] = False
-    o["total_price"] = o["base_price"]
-    uname = get_username(chat_id)
-    add_norm(o["item_key"], chat_id, uname)
-    before, after, total = queue_info(o["item_key"], chat_id)
-
-    send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
-    text = (
-        f'{em(E_INFO)} <b>Ваша очередь:</b>\n\n'
-        f'{em(E_USER)} Перед вами — <b>{before}</b>\n'
-        f'{em(E_USER)} После вас — <b>{after}</b>\n\n'
-        f'{em(E_INFO)} Вам напишет человек, когда вы станете первые в очереди {em(E_STAR2)}\n'
-        f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
-    )
-    clear_last(chat_id)
-    r = send(chat_id, text, after_norm_menu(pid))
-    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
-
-    send(OWNER_ID,
-        f'{em(E_BOX)} <b>НОВЫЙ ЗАКАЗ</b>\n\n'
-        f'{em(E_USER)} @{uname}\n'
-        f'{em(E_SHOP)} {o["item_name"]}\n'
-        f'{em(E_PRICE)} {o["total_price"]}₽')
-
-def on_view_queue(chat_id, pid):
+def screen_view_queue(chat_id, msg_id, pid):
     o = orders.get(pid)
     if not o: return
     before, after, total = queue_info(o["item_key"], chat_id)
@@ -518,25 +484,65 @@ def on_view_queue(chat_id, pid):
         f'{em(E_USER)} Вам напишет человек, когда вы станете первые {em(E_STAR2)}\n'
         f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
     )
-    clear_last(chat_id)
+    replace_screen(chat_id, msg_id, text, after_prio_menu(pid))
+
+def screen_priority_paid(chat_id, msg_id, pid):
+    o = orders.get(pid)
+    if not o: return
+    o["status"] = "priority_paid"
+    o["priority"] = True
+    o["total_price"] = o["base_price"] + 100
+    uname = get_username(chat_id)
+    add_prio(o["item_key"], chat_id, uname)
+    before, after, total = queue_info(o["item_key"], chat_id)
+
+    if msg_id: del_msg(chat_id, msg_id)
+    send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
+    text = (
+        f'{em(E_STAR2)} <b>Вы оплатили «Приоритет в очереди»</b>\n\n'
+        f'{em(E_INFO)} Текущая очередь: перед вами — \n'
+        f'<b>{before}</b> человек, которые первые приобрели «приоритет»\n\n'
+        f'После вас — <b>{after}</b> человек, которые после вас приобрели «приоритет»\n\n'
+        f'{em(E_USER)} Вам напишет человек, когда вы станете первые в очереди {em(E_STAR2)}\n'
+        f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
+    )
     r = send(chat_id, text, after_prio_menu(pid))
     if r.get("ok"): remember(chat_id, r["result"]["message_id"])
 
-# ============================================================
-# ГЛАВНОЕ МЕНЮ
-# ============================================================
-def send_main(chat_id):
-    global PHOTO_FILE_ID
-    clear_last(chat_id)
-    r = send_photo(chat_id, PHOTO_FILE_ID or PHOTO_URL, caption=MAIN_CAPTION, kb=main_menu())
-    if r.get("ok"):
-        if not PHOTO_FILE_ID:
-            try: PHOTO_FILE_ID = r["result"]["photo"][-1]["file_id"]
-            except: pass
-        remember(chat_id, r["result"]["message_id"])
-    else:
-        r2 = send(chat_id, MAIN_CAPTION, main_menu())
-        if r2.get("ok"): remember(chat_id, r2["result"]["message_id"])
+    send(OWNER_ID,
+        f'{em(E_ROCKET)} <b>НОВЫЙ ПРИОРИТЕТ!</b>\n\n'
+        f'{em(E_USER)} @{uname}\n'
+        f'{em(E_SHOP)} {o["item_name"]}\n'
+        f'{em(E_PRICE)} {o["total_price"]}₽\n'
+        f'{em(E_INFO)} Перед — {before}, после — {after}')
+
+def screen_normal_paid(chat_id, msg_id, pid):
+    o = orders.get(pid)
+    if not o: return
+    o["status"] = "normal_paid"
+    o["priority"] = False
+    o["total_price"] = o["base_price"]
+    uname = get_username(chat_id)
+    add_norm(o["item_key"], chat_id, uname)
+    before, after, total = queue_info(o["item_key"], chat_id)
+
+    if msg_id: del_msg(chat_id, msg_id)
+    send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
+    text = (
+        f'{em(E_INFO)} <b>Ваша очередь:</b>\n\n'
+        f'{em(E_USER)} Перед вами — <b>{before}</b>\n'
+        f'{em(E_USER)} После вас — <b>{after}</b>\n\n'
+        f'{em(E_INFO)} Вам напишет человек, когда вы станете первые в очереди {em(E_STAR2)}\n'
+        f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
+    )
+    r = send(chat_id, text, after_norm_menu(pid))
+    if r.get("ok"): remember(chat_id, r["result"]["message_id"])
+
+    send(OWNER_ID,
+        f'{em(E_BOX)} <b>НОВЫЙ ЗАКАЗ</b>\n\n'
+        f'{em(E_USER)} @{uname}\n'
+        f'{em(E_SHOP)} {o["item_name"]}\n'
+        f'{em(E_PRICE)} {o["total_price"]}₽')
 
 # ============================================================
 # CALLBACK РОУТЕР
@@ -546,170 +552,193 @@ def handle_cb(cb):
     chat_id = cb["from"]["id"]
     data = cb.get("data", "")
     msg_id = cb.get("message", {}).get("message_id")
-    uid = str(chat_id)
 
-    # ---------- Навигация ----------
-    if data == "back_main":
-        answer_cb(cb_id, "Меню")
-        send_main(chat_id)
-        return
+    try:
+        # --- навигация ---
+        if data == "back_main":
+            answer_cb(cb_id, "Меню")
+            screen_main(chat_id, msg_id); return
 
-    if data == "menu_support":
-        edit(chat_id, msg_id,
-             f'{em(E_SHOP)} <b>СОПРОВОЖДЕНИЯ</b>\n\n{em(E_INFO)} Выберите вариант:\n\n{stars_row()}',
-             support_menu())
-        return answer_cb(cb_id, "Сопровождения")
+        if data == "menu_support":
+            answer_cb(cb_id, "Сопровождения")
+            screen_support(chat_id, msg_id); return
 
-    if data == "menu_kits":
-        edit(chat_id, msg_id, KITS_TEXT, back_btn()); return answer_cb(cb_id, "Комплекты")
-    if data == "menu_loot":
-        edit(chat_id, msg_id, LOOT_TEXT, back_btn()); return answer_cb(cb_id, "Скупка лута")
-    if data == "menu_boost":
-        edit(chat_id, msg_id,
-             f'{em(E_ROCKET)} <b>БУСТ БАЛАНСА</b>\n\n{em(E_INFO)} Выберите сумму:\n\n{stars_row()}',
-             boost_menu())
-        return answer_cb(cb_id, "Буст баланса")
+        if data == "menu_kits":
+            answer_cb(cb_id, "Комплекты")
+            screen_kits(chat_id, msg_id); return
 
-    # ---------- БАБОЧКИ ----------
-    if data == "menu_butterfly":
-        edit(chat_id, msg_id, BUTTERFLY_TEXT, butterfly_menu())
-        return answer_cb(cb_id, "Бабочки")
+        if data == "menu_loot":
+            answer_cb(cb_id, "Скупка лута")
+            screen_loot(chat_id, msg_id); return
 
-    if data == "usi_menu":
-        edit(chat_id, msg_id, USI_TEXT, usi_menu())
-        return answer_cb(cb_id, "ЮСИ")
+        if data == "menu_boost":
+            answer_cb(cb_id, "Буст баланса")
+            screen_boost(chat_id, msg_id); return
 
-    if data.startswith("usi_"):
-        u = data[4:]
-        for amt, price in USI_LIST:
-            if amt == u:
-                show_method(chat_id, "usi", f"usi_{amt}", f"ЮСИ {amt} шт.", price)
-                answer_cb(cb_id, f"ЮСИ {amt}")
+        # --- бабочки ---
+        if data == "menu_butterfly":
+            answer_cb(cb_id, "Бабочки")
+            screen_butterfly(chat_id, msg_id); return
+
+        if data == "usi_menu":
+            answer_cb(cb_id, "ЮСИ")
+            screen_usi(chat_id, msg_id); return
+
+        if data.startswith("usi_"):
+            u = data[len("usi_"):]
+            for amt, price in USI_LIST:
+                if amt == u:
+                    answer_cb(cb_id, f"ЮСИ {amt}")
+                    screen_method(chat_id, msg_id, "usi", f"usi_{amt}", f"ЮСИ {amt} шт.", price)
+                    return
+            answer_cb(cb_id, "Не найдено", True); return
+
+        if data.startswith("bf_"):
+            k = data[len("bf_"):]
+            if k in BUTTERFLY_PRICES:
+                name, price = BUTTERFLY_PRICES[k]
+                answer_cb(cb_id, name)
+                screen_method(chat_id, msg_id, "butterfly", k, name, price)
                 return
-        return answer_cb(cb_id, "Не найдено", True)
+            answer_cb(cb_id, "Не найдено", True); return
 
-    if data.startswith("bf_"):
-        k = data[3:]
-        if k in BUTTERFLY_PRICES:
-            name, price = BUTTERFLY_PRICES[k]
-            show_method(chat_id, "butterfly", k, name, price)
-            answer_cb(cb_id, name)
-        return
-
-    # ---------- Сопровождения / Буст ----------
-    if data.startswith("sup_"):
-        k = data[4:]
-        if k in SUP_PRICES:
-            show_method(chat_id, "support", k, SUP_NAMES.get(k, ""), SUP_PRICES[k])
-            answer_cb(cb_id, SUP_NAMES.get(k, ""))
-        return
-
-    if data.startswith("boost_"):
-        amt = data[6:]
-        for a, p in BOOST_LIST:
-            if a == amt:
-                show_method(chat_id, "boost", amt, f"Буст на {amt}", p)
-                answer_cb(cb_id, f"Буст {amt}")
+        # --- сопровождение / буст ---
+        if data.startswith("sup_"):
+            k = data[len("sup_"):]
+            if k in SUP_PRICES:
+                answer_cb(cb_id, SUP_NAMES.get(k, ""))
+                screen_method(chat_id, msg_id, "support", k, SUP_NAMES.get(k, ""), SUP_PRICES[k])
                 return
-        return
+            answer_cb(cb_id, "Не найдено", True); return
 
-    # ---------- Метод покупки ----------
-    if data.startswith("method_normal_"):
-        on_normal_choice(chat_id, cb_id, data[len("method_normal_"):]); return
-    if data.startswith("method_priority_"):
-        on_priority_choice(chat_id, cb_id, data[len("method_priority_"):]); return
+        if data.startswith("boost_"):
+            amt = data[len("boost_"):]
+            for a, p in BOOST_LIST:
+                if a == amt:
+                    answer_cb(cb_id, f"Буст {amt}")
+                    screen_method(chat_id, msg_id, "boost", amt, f"Буст на {amt}", p)
+                    return
+            answer_cb(cb_id, "Не найдено", True); return
 
-    if data.startswith("what_priority_"):
-        pid = data[len("what_priority_"):]
+        # --- метод ---
+        if data.startswith("method_normal_"):
+            pid = data[len("method_normal_"):]
+            answer_cb(cb_id, "Обычная покупка")
+            screen_normal(chat_id, msg_id, pid); return
+
+        if data.startswith("method_priority_"):
+            pid = data[len("method_priority_"):]
+            answer_cb(cb_id, "Приоритет")
+            screen_priority(chat_id, msg_id, pid); return
+
+        if data.startswith("what_priority_"):
+            pid = data[len("what_priority_"):]
+            answer_cb(cb_id)
+            screen_what_priority(chat_id, msg_id, pid); return
+
+        if data.startswith("priority_paid_"):
+            pid = data[len("priority_paid_"):]
+            answer_cb(cb_id, "Спасибо")
+            screen_priority_paid(chat_id, msg_id, pid); return
+
+        if data.startswith("normal_paid_"):
+            pid = data[len("normal_paid_"):]
+            answer_cb(cb_id, "Спасибо")
+            screen_normal_paid(chat_id, msg_id, pid); return
+
+        if data.startswith("view_queue_"):
+            pid = data[len("view_queue_"):]
+            answer_cb(cb_id, "Очередь")
+            screen_view_queue(chat_id, msg_id, pid); return
+
+        if data.startswith("wait_"):
+            answer_cb(cb_id, "Ожидайте"); return
+
+        if data.startswith("cancel_"):
+            pid = data[len("cancel_"):]
+            if pid in orders: orders[pid]["status"] = "cancelled"
+            answer_cb(cb_id, "Отменено")
+            screen_main(chat_id, msg_id); return
+
+        # --- админ ---
+        if data.startswith("owner_yes_"):
+            pid = data[len("owner_yes_"):]; o = orders.get(pid)
+            if not o:
+                answer_cb(cb_id, "Заказ не найден", True); return
+            o["status"] = "awaiting_info"
+            send(o["user_id"],
+                 f'{em(E_CHECK)} <b>Оплата подтверждена!</b>\n\n'
+                 f'{em(E_USER)} Введите ваш PUBG ID (только цифры):')
+            user_data.setdefault(str(o["user_id"]), {})["awaiting_pubg"] = True
+            user_data[str(o["user_id"])]["order_id"] = pid
+            send(OWNER_ID,
+                 f'{em(E_ROCKET)} <b>ЗАКАЗ ПОДТВЕРЖДЁН</b>\n\n'
+                 f'{em(E_USER)} @{o.get("username", "—")}\n'
+                 f'{em(E_BOX)} {o["item_name"]}\n\n'
+                 f'{em(E_INFO)} Ждём PUBG ID от покупателя…',
+                 owner_team_free(pid))
+            answer_cb(cb_id, "Подтверждено"); return
+
+        if data.startswith("owner_no_"):
+            pid = data[len("owner_no_"):]; o = orders.get(pid)
+            if o:
+                o["status"] = "cancelled"
+                send(o["user_id"], f'{em(E_CROSS)} <b>Оплата не подтверждена</b>\n\n{em(E_INFO)} @Manager_Kranzayy')
+            answer_cb(cb_id, "Отменено"); return
+
+        if data.startswith("done_yes_"):
+            pid = data[len("done_yes_"):]; o = orders.get(pid)
+            if o:
+                o["status"] = "completed"
+                send(o["user_id"], f'{em(E_CHECK)} <b>Заказ выполнен!</b>\n\n{em(E_HEART)} Спасибо за покупку!')
+            answer_cb(cb_id, "Готово"); return
+
+        if data.startswith("done_no_"):
+            answer_cb(cb_id, "Ок"); return
+
+        if data.startswith("team_free_"):
+            pid = data[len("team_free_"):]; o = orders.get(pid)
+            if o:
+                send(o["user_id"], f'{em(E_CHECK)} <b>Команда свободна и ждет вас в игре !!!</b>')
+                send(OWNER_ID, f'{em(E_CHECK)} Уведомление отправлено @{o.get("username", "—")}')
+            answer_cb(cb_id, "Отправлено"); return
+
+        if data.startswith("send_qr_"):
+            pid = data[len("send_qr_"):]
+            awaiting_qr[pid] = True
+            send(OWNER_ID, f'{em(E_INFO)} Отправьте фото QR-кода для {pid}')
+            answer_cb(cb_id, "Отправьте фото"); return
+
+        if data.startswith("join_"):
+            pid = data[len("join_"):]; o = orders.get(pid)
+            if not o:
+                answer_cb(cb_id, "Заказ не найден", True); return
+            gm = group_messages.setdefault(pid, {"parts": []})
+            parts = gm["parts"]
+            uname = get_username(chat_id)
+            if len(parts) >= MAX_PARTICIPANTS:
+                answer_cb(cb_id, "Уже 4 участника", True); return
+            if uname in parts:
+                answer_cb(cb_id, "Вы уже участвуете", True); return
+            parts.append(uname)
+            # правим сообщение в группе (там был текст, не фото)
+            if msg_id:
+                gtext = group_text(pid)
+                p = {"chat_id": GROUP_ID, "message_id": msg_id, "text": gtext,
+                     "parse_mode": "HTML", "reply_markup": json.dumps(group_join(pid))}
+                r = api("editMessageText", p)
+                if not r.get("ok"):
+                    p2 = {"chat_id": GROUP_ID, "message_id": msg_id, "text": strip_html(gtext),
+                          "reply_markup": json.dumps(group_join(pid))}
+                    api("editMessageText", p2)
+            answer_cb(cb_id, "Вы участвуете!"); return
+
         answer_cb(cb_id)
-        edit(chat_id, msg_id,
-             f'{em(E_INFO)} <b>ЧТО ТАКОЕ ПРИОРИТЕТ?</b>\n\n'
-             f'{em(E_ROCKET)} Возможность получить сопровождение <b>вне очереди</b>!\n\n'
-             f'{em(E_CHECK)} Вы будете одними из первых.\n'
-             f'{em(E_MONEY)} Доп. плата: <b>+100₽</b>\n\n'
-             f'{stars_row()}', priority_menu(pid))
-        return
 
-    if data.startswith("priority_paid_"):
-        on_priority_paid(chat_id, data[len("priority_paid_"):]); return answer_cb(cb_id, "Спасибо")
-    if data.startswith("normal_paid_"):
-        on_normal_paid(chat_id, data[len("normal_paid_"):]); return answer_cb(cb_id, "Спасибо")
-    if data.startswith("view_queue_"):
-        on_view_queue(chat_id, data[len("view_queue_"):]); return answer_cb(cb_id, "Очередь")
-    if data.startswith("wait_"):
-        return answer_cb(cb_id, "Ожидайте")
-
-    if data.startswith("cancel_"):
-        pid = data[len("cancel_"):]
-        if pid in orders: orders[pid]["status"] = "cancelled"
-        answer_cb(cb_id, "Отменено")
-        send_main(chat_id)
-        return
-
-    # ---------- Админ ----------
-    if data.startswith("owner_yes_"):
-        pid = data[len("owner_yes_"):]; o = orders.get(pid)
-        if not o: return answer_cb(cb_id, "Заказ не найден", True)
-        o["status"] = "awaiting_info"
-        send(o["user_id"],
-             f'{em(E_CHECK)} <b>Оплата подтверждена!</b>\n\n'
-             f'{em(E_USER)} Введите ваш PUBG ID (только цифры):')
-        user_data.setdefault(str(o["user_id"]), {})["awaiting_pubg"] = True
-        user_data[str(o["user_id"])]["order_id"] = pid
-        send(OWNER_ID,
-             f'{em(E_ROCKET)} <b>ЗАКАЗ ПОДТВЕРЖДЁН</b>\n\n'
-             f'{em(E_USER)} @{o.get("username", "—")}\n'
-             f'{em(E_BOX)} {o["item_name"]}\n\n'
-             f'{em(E_INFO)} Ждём PUBG ID от покупателя…',
-             owner_team_free(pid))
-        return answer_cb(cb_id, "Подтверждено")
-
-    if data.startswith("owner_no_"):
-        pid = data[len("owner_no_"):]; o = orders.get(pid)
-        if o:
-            o["status"] = "cancelled"
-            send(o["user_id"], f'{em(E_CROSS)} <b>Оплата не подтверждена</b>\n\n{em(E_INFO)} @Manager_Kranzayy')
-        return answer_cb(cb_id, "Отменено")
-
-    if data.startswith("done_yes_"):
-        pid = data[len("done_yes_"):]; o = orders.get(pid)
-        if o:
-            o["status"] = "completed"
-            send(o["user_id"], f'{em(E_CHECK)} <b>Заказ выполнен!</b>\n\n{em(E_HEART)} Спасибо за покупку!')
-        return answer_cb(cb_id, "Готово")
-
-    if data.startswith("done_no_"):
-        return answer_cb(cb_id, "Ок")
-
-    if data.startswith("send_qr_"):
-        pid = data[len("send_qr_"):]
-        awaiting_qr[pid] = True
-        send(OWNER_ID, f'{em(E_INFO)} Отправьте фото QR-кода для {pid}')
-        return answer_cb(cb_id, "Отправьте фото")
-
-    if data.startswith("team_free_"):
-        pid = data[len("team_free_"):]; o = orders.get(pid)
-        if o:
-            send(o["user_id"], f'{em(E_CHECK)} <b>Команда свободна и ждет вас в игре !!!</b>')
-            send(OWNER_ID, f'{em(E_CHECK)} Уведомление отправлено @{o.get("username", "—")}')
-        return answer_cb(cb_id, "Отправлено")
-
-    if data.startswith("join_"):
-        pid = data[len("join_"):]; o = orders.get(pid)
-        if not o: return answer_cb(cb_id, "Заказ не найден", True)
-        gm = group_messages.setdefault(pid, {"parts": []})
-        parts = gm["parts"]
-        uname = get_username(chat_id)
-        if len(parts) >= MAX_PARTICIPANTS:
-            return answer_cb(cb_id, "Уже 4 участника", True)
-        if uname in parts:
-            return answer_cb(cb_id, "Вы уже участвуете", True)
-        parts.append(uname)
-        if msg_id:
-            edit(GROUP_ID, msg_id, group_text(pid), group_join(pid))
-        return answer_cb(cb_id, "Вы участвуете!")
-
-    answer_cb(cb_id)
+    except Exception as e:
+        logger.error(f"handle_cb: {e}")
+        traceback.print_exc()
+        answer_cb(cb_id)
 
 # ============================================================
 # ГРУППА
@@ -731,11 +760,11 @@ def group_text(pid):
 # ============================================================
 def handle_msg(msg):
     chat_id = msg["chat"]["id"]
-    text = msg.get("text", "").strip()
+    text = (msg.get("text") or "").strip()
     uid = msg["from"]["id"]
 
     if text.startswith("/start"):
-        send_main(chat_id); return
+        screen_main(chat_id); return
     if text == "/myid" and uid == OWNER_ID:
         send(chat_id, f'<code>{chat_id}</code>'); return
     if text == "/stats" and uid == OWNER_ID:
@@ -774,7 +803,7 @@ def handle_msg(msg):
 # MAIN LOOP
 # ============================================================
 def main():
-    logger.info("BOT v21 ЗАПУЩЕН")
+    logger.info("BOT v23 ЗАПУЩЕН")
     offset = 0
     while True:
         try:
