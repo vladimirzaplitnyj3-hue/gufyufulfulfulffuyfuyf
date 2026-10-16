@@ -1,7 +1,7 @@
 # ============================================================
-# KRANZAYY | METRO SHOP BOT — v23 FINAL
-# Кнопки: sendMessage + deleteMessage (без edit)
-# Эмодзи: только premium в текстах
+# KRANZAYY | METRO SHOP BOT — v24 FINAL
+# Без edit-ов. Только sendMessage + deleteMessage.
+# Только premium-эмодзи. Кнопки рабочие.
 # ============================================================
 
 import requests, json, time, logging, sys, traceback, re
@@ -31,7 +31,7 @@ PAY_LINK_USI = "https://t.me/Manager_Kranzayy"
 MAX_PARTICIPANTS = 4
 
 # ============================================================
-# PREMIUM-ЭМОДЗИ
+# PREMIUM-ЭМОДЗИ (только для текстов)
 # ============================================================
 E_MENU    = "5231235536206730707"
 E_SHOP    = "5278702045883292456"
@@ -100,7 +100,6 @@ def send(chat_id, text, kb=None):
     if kb: p["reply_markup"] = json.dumps(kb)
     r = api("sendMessage", p)
     if r.get("ok"): return r
-    # fallback: без HTML (если premium emoji не поддерживаются чатом)
     p2 = {"chat_id": chat_id, "text": strip_html(text)}
     if kb: p2["reply_markup"] = json.dumps(kb)
     return api("sendMessage", p2)
@@ -125,7 +124,9 @@ def answer_cb(cb_id, text=None, alert=False):
 
 def del_msg(chat_id, msg_id):
     if not msg_id: return
-    return api("deleteMessage", {"chat_id": chat_id, "message_id": msg_id})
+    try:
+        api("deleteMessage", {"chat_id": chat_id, "message_id": msg_id})
+    except: pass
 
 def get_username(chat_id):
     try:
@@ -149,11 +150,14 @@ def clear_last(uid):
     if lid: del_msg(uid, lid)
     if s in user_data: user_data[s]["last_msg_id"] = None
 
-def replace_screen(chat_id, msg_id, text, kb=None):
-    """Удаляет старое сообщение и отправляет новое — вместо edit."""
-    if msg_id:
-        del_msg(chat_id, msg_id)
-    r = send(chat_id, text, kb)
+def replace_screen(chat_id, old_msg_id, text, kb=None, photo=None, caption=None):
+    """Удаляет старое сообщение и отправляет новое. Без edit."""
+    if old_msg_id:
+        del_msg(chat_id, old_msg_id)
+    if photo:
+        r = send_photo(chat_id, photo, caption=caption or text, kb=kb)
+    else:
+        r = send(chat_id, text, kb)
     if r.get("ok"):
         remember(chat_id, r["result"]["message_id"])
     return r
@@ -182,7 +186,7 @@ def queue_info(k, uid):
     return 0, 0, len(p) + len(n)
 
 # ============================================================
-# КЛАВИАТУРЫ (чистый текст, без style/icon — иначе Telegram ломает reply_markup)
+# КЛАВИАТУРЫ
 # ============================================================
 
 def main_menu():
@@ -381,11 +385,11 @@ BUTTERFLY_PRICES = {
 }
 
 # ============================================================
-# ЭКРАНЫ
+# ЭКРАНЫ (только send + delete, никаких edit)
 # ============================================================
-def screen_main(chat_id, msg_id=None):
+def screen_main(chat_id, old_msg_id=None):
     global PHOTO_FILE_ID
-    if msg_id: del_msg(chat_id, msg_id)
+    if old_msg_id: del_msg(chat_id, old_msg_id)
     clear_last(chat_id)
     r = send_photo(chat_id, PHOTO_FILE_ID or PHOTO_URL, caption=MAIN_CAPTION, kb=main_menu())
     if r.get("ok"):
@@ -397,28 +401,27 @@ def screen_main(chat_id, msg_id=None):
         r2 = send(chat_id, MAIN_CAPTION, main_menu())
         if r2.get("ok"): remember(chat_id, r2["result"]["message_id"])
 
-def screen_support(chat_id, msg_id):
+def screen_support(chat_id, old_msg_id):
     text = f'{em(E_SHOP)} <b>СОПРОВОЖДЕНИЯ</b>\n\n{em(E_INFO)} Выберите вариант:\n\n{stars_row()}'
-    replace_screen(chat_id, msg_id, text, support_menu())
+    replace_screen(chat_id, old_msg_id, text, support_menu())
 
-def screen_kits(chat_id, msg_id):
-    replace_screen(chat_id, msg_id, KITS_TEXT, back_btn())
+def screen_kits(chat_id, old_msg_id):
+    replace_screen(chat_id, old_msg_id, KITS_TEXT, back_btn())
 
-def screen_loot(chat_id, msg_id):
-    replace_screen(chat_id, msg_id, LOOT_TEXT, back_btn())
+def screen_loot(chat_id, old_msg_id):
+    replace_screen(chat_id, old_msg_id, LOOT_TEXT, back_btn())
 
-def screen_boost(chat_id, msg_id):
+def screen_boost(chat_id, old_msg_id):
     text = f'{em(E_ROCKET)} <b>БУСТ БАЛАНСА</b>\n\n{em(E_INFO)} Выберите сумму:\n\n{stars_row()}'
-    replace_screen(chat_id, msg_id, text, boost_menu())
+    replace_screen(chat_id, old_msg_id, text, boost_menu())
 
-def screen_butterfly(chat_id, msg_id):
-    replace_screen(chat_id, msg_id, BUTTERFLY_TEXT, butterfly_menu())
+def screen_butterfly(chat_id, old_msg_id):
+    replace_screen(chat_id, old_msg_id, BUTTERFLY_TEXT, butterfly_menu())
 
-def screen_usi(chat_id, msg_id):
-    replace_screen(chat_id, msg_id, USI_TEXT, usi_menu())
+def screen_usi(chat_id, old_msg_id):
+    replace_screen(chat_id, old_msg_id, USI_TEXT, usi_menu())
 
-def screen_method(chat_id, msg_id, itype, ikey, iname, price):
-    clear_last(chat_id)
+def screen_method(chat_id, old_msg_id, itype, ikey, iname, price):
     pid = gen_pid()
     orders[pid] = {"user_id": chat_id, "type": itype, "item_key": ikey,
                    "item_name": iname, "price": price, "base_price": price,
@@ -430,10 +433,10 @@ def screen_method(chat_id, msg_id, itype, ikey, iname, price):
         f'{em(E_INFO)} Выберите как вы хотите купить, ниже {em(E_CHECK)}\n\n'
         f'{stars_row()}'
     )
-    replace_screen(chat_id, msg_id, text, method_menu(pid))
+    replace_screen(chat_id, old_msg_id, text, method_menu(pid))
     return pid
 
-def screen_priority(chat_id, msg_id, pid):
+def screen_priority(chat_id, old_msg_id, pid):
     o = orders.get(pid)
     if not o: return
     o["status"] = "choosing_priority"
@@ -446,9 +449,9 @@ def screen_priority(chat_id, msg_id, pid):
         f'{em(E_INFO)} Выберите действие\n\n'
         f'{stars_row()}'
     )
-    replace_screen(chat_id, msg_id, text, priority_menu(pid))
+    replace_screen(chat_id, old_msg_id, text, priority_menu(pid))
 
-def screen_normal(chat_id, msg_id, pid):
+def screen_normal(chat_id, old_msg_id, pid):
     o = orders.get(pid)
     if not o: return
     o["status"] = "choosing_normal"
@@ -459,9 +462,9 @@ def screen_normal(chat_id, msg_id, pid):
         f'{em(E_PRICE)} Цена: <b>{o["base_price"]}₽</b>\n\n'
         f'{stars_row()}'
     )
-    replace_screen(chat_id, msg_id, text, normal_pay_menu(pid))
+    replace_screen(chat_id, old_msg_id, text, normal_pay_menu(pid))
 
-def screen_what_priority(chat_id, msg_id, pid):
+def screen_what_priority(chat_id, old_msg_id, pid):
     text = (
         f'{em(E_INFO)} <b>ЧТО ТАКОЕ ПРИОРИТЕТ?</b>\n\n'
         f'{em(E_ROCKET)} Возможность получить сопровождение <b>вне очереди</b>!\n\n'
@@ -469,9 +472,9 @@ def screen_what_priority(chat_id, msg_id, pid):
         f'{em(E_MONEY)} Доп. плата: <b>+100₽</b>\n\n'
         f'{stars_row()}'
     )
-    replace_screen(chat_id, msg_id, text, priority_menu(pid))
+    replace_screen(chat_id, old_msg_id, text, priority_menu(pid))
 
-def screen_view_queue(chat_id, msg_id, pid):
+def screen_view_queue(chat_id, old_msg_id, pid):
     o = orders.get(pid)
     if not o: return
     before, after, total = queue_info(o["item_key"], chat_id)
@@ -484,9 +487,9 @@ def screen_view_queue(chat_id, msg_id, pid):
         f'{em(E_USER)} Вам напишет человек, когда вы станете первые {em(E_STAR2)}\n'
         f'{em(E_INFO)} Просьба, не спамить {em(E_INFO)}'
     )
-    replace_screen(chat_id, msg_id, text, after_prio_menu(pid))
+    replace_screen(chat_id, old_msg_id, text, after_prio_menu(pid))
 
-def screen_priority_paid(chat_id, msg_id, pid):
+def screen_priority_paid(chat_id, old_msg_id, pid):
     o = orders.get(pid)
     if not o: return
     o["status"] = "priority_paid"
@@ -496,7 +499,7 @@ def screen_priority_paid(chat_id, msg_id, pid):
     add_prio(o["item_key"], chat_id, uname)
     before, after, total = queue_info(o["item_key"], chat_id)
 
-    if msg_id: del_msg(chat_id, msg_id)
+    if old_msg_id: del_msg(chat_id, old_msg_id)
     send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
     text = (
         f'{em(E_STAR2)} <b>Вы оплатили «Приоритет в очереди»</b>\n\n'
@@ -516,7 +519,7 @@ def screen_priority_paid(chat_id, msg_id, pid):
         f'{em(E_PRICE)} {o["total_price"]}₽\n'
         f'{em(E_INFO)} Перед — {before}, после — {after}')
 
-def screen_normal_paid(chat_id, msg_id, pid):
+def screen_normal_paid(chat_id, old_msg_id, pid):
     o = orders.get(pid)
     if not o: return
     o["status"] = "normal_paid"
@@ -526,7 +529,7 @@ def screen_normal_paid(chat_id, msg_id, pid):
     add_norm(o["item_key"], chat_id, uname)
     before, after, total = queue_info(o["item_key"], chat_id)
 
-    if msg_id: del_msg(chat_id, msg_id)
+    if old_msg_id: del_msg(chat_id, old_msg_id)
     send(chat_id, f'{em(E_HEART)} <b>Спасибо за покупку !!!</b>')
     text = (
         f'{em(E_INFO)} <b>Ваша очередь:</b>\n\n'
@@ -554,36 +557,43 @@ def handle_cb(cb):
     msg_id = cb.get("message", {}).get("message_id")
 
     try:
+        # всегда отвечаем на callback сразу, чтобы не «залипала» кнопка
+        # (для навигационных — короткий тост; для остальных — тихо)
+        nav_toasts = {
+            "back_main": "Меню",
+            "menu_support": "Сопровождения",
+            "menu_kits": "Комплекты",
+            "menu_loot": "Скупка лута",
+            "menu_boost": "Буст баланса",
+            "menu_butterfly": "Бабочки",
+            "usi_menu": "ЮСИ",
+        }
+        if data in nav_toasts:
+            answer_cb(cb_id, nav_toasts[data])
+
         # --- навигация ---
         if data == "back_main":
-            answer_cb(cb_id, "Меню")
             screen_main(chat_id, msg_id); return
 
         if data == "menu_support":
-            answer_cb(cb_id, "Сопровождения")
             screen_support(chat_id, msg_id); return
 
         if data == "menu_kits":
-            answer_cb(cb_id, "Комплекты")
             screen_kits(chat_id, msg_id); return
 
         if data == "menu_loot":
-            answer_cb(cb_id, "Скупка лута")
             screen_loot(chat_id, msg_id); return
 
         if data == "menu_boost":
-            answer_cb(cb_id, "Буст баланса")
             screen_boost(chat_id, msg_id); return
 
-        # --- бабочки ---
         if data == "menu_butterfly":
-            answer_cb(cb_id, "Бабочки")
             screen_butterfly(chat_id, msg_id); return
 
         if data == "usi_menu":
-            answer_cb(cb_id, "ЮСИ")
             screen_usi(chat_id, msg_id); return
 
+        # --- ЮСИ ---
         if data.startswith("usi_"):
             u = data[len("usi_"):]
             for amt, price in USI_LIST:
@@ -593,6 +603,7 @@ def handle_cb(cb):
                     return
             answer_cb(cb_id, "Не найдено", True); return
 
+        # --- Бабочки ---
         if data.startswith("bf_"):
             k = data[len("bf_"):]
             if k in BUTTERFLY_PRICES:
@@ -602,7 +613,7 @@ def handle_cb(cb):
                 return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- сопровождение / буст ---
+        # --- Сопровождение ---
         if data.startswith("sup_"):
             k = data[len("sup_"):]
             if k in SUP_PRICES:
@@ -611,6 +622,7 @@ def handle_cb(cb):
                 return
             answer_cb(cb_id, "Не найдено", True); return
 
+        # --- Буст ---
         if data.startswith("boost_"):
             amt = data[len("boost_"):]
             for a, p in BOOST_LIST:
@@ -620,7 +632,7 @@ def handle_cb(cb):
                     return
             answer_cb(cb_id, "Не найдено", True); return
 
-        # --- метод ---
+        # --- Метод ---
         if data.startswith("method_normal_"):
             pid = data[len("method_normal_"):]
             answer_cb(cb_id, "Обычная покупка")
@@ -660,7 +672,7 @@ def handle_cb(cb):
             answer_cb(cb_id, "Отменено")
             screen_main(chat_id, msg_id); return
 
-        # --- админ ---
+        # --- Админ ---
         if data.startswith("owner_yes_"):
             pid = data[len("owner_yes_"):]; o = orders.get(pid)
             if not o:
@@ -721,24 +733,27 @@ def handle_cb(cb):
             if uname in parts:
                 answer_cb(cb_id, "Вы уже участвуете", True); return
             parts.append(uname)
-            # правим сообщение в группе (там был текст, не фото)
+            # в группе правим только сообщение-сопровождение (там текст, не фото)
             if msg_id:
                 gtext = group_text(pid)
                 p = {"chat_id": GROUP_ID, "message_id": msg_id, "text": gtext,
                      "parse_mode": "HTML", "reply_markup": json.dumps(group_join(pid))}
                 r = api("editMessageText", p)
                 if not r.get("ok"):
-                    p2 = {"chat_id": GROUP_ID, "message_id": msg_id, "text": strip_html(gtext),
+                    p2 = {"chat_id": GROUP_ID, "message_id": msg_id,
+                          "text": strip_html(gtext),
                           "reply_markup": json.dumps(group_join(pid))}
                     api("editMessageText", p2)
             answer_cb(cb_id, "Вы участвуете!"); return
 
+        # неизвестный callback
         answer_cb(cb_id)
 
     except Exception as e:
         logger.error(f"handle_cb: {e}")
         traceback.print_exc()
-        answer_cb(cb_id)
+        try: answer_cb(cb_id)
+        except: pass
 
 # ============================================================
 # ГРУППА
@@ -803,7 +818,7 @@ def handle_msg(msg):
 # MAIN LOOP
 # ============================================================
 def main():
-    logger.info("BOT v23 ЗАПУЩЕН")
+    logger.info("BOT v24 ЗАПУЩЕН — навигация через send+delete, кнопки без style/icon")
     offset = 0
     while True:
         try:
