@@ -22,36 +22,27 @@ dp = Dispatcher()
 
 
 # ================== ПРЕМИУМ-ЭМОДЗИ ==================
-# Невидимый fallback (word joiner \u2060).
-# Если у получателя есть Telegram Premium — показывается ПРЕМИУМ-эмодзи.
-# Если нет — отображается пустота, а НЕ обычный эмодзи.
-NW = "\u2060"
-
-E_METRO   = f'<tg-emoji emoji-id="5357432498680767940">{NW}</tg-emoji>'
-E_REVIEWS = f'<tg-emoji emoji-id="5458908492687497206">{NW}</tg-emoji>'
-E_YOUTUBE = f'<tg-emoji emoji-id="5334681713316479679">{NW}</tg-emoji>'
-E_TIKTOK  = f'<tg-emoji emoji-id="5327982530702359565">{NW}</tg-emoji>'
-E_POINT   = f'<tg-emoji emoji-id="5460795821576443427">{NW}</tg-emoji>'
-E_LS      = f'<tg-emoji emoji-id="5456327792868220208">{NW}</tg-emoji>'
+# Формат: <tg-emoji emoji-id="ID">ОБЫЧНЫЙ_ЭМОДЗИ</tg-emoji>
+# Если у бота/получателя есть Premium — покажется ПРЕМИУМ-эмодзи.
+# Если нет — покажется обычный эмодзи (fallback), сообщение не будет пустым.
 # ====================================================
 
-
 MESSAGE_TEXT = (
-    f'{E_METRO} МЕТРО ШОП — @NAPOLEONPUBGM\n\n'
+    '<tg-emoji emoji-id="5357432498680767940">🛒</tg-emoji> МЕТРО ШОП — @NAPOLEONPUBGM\n\n'
 
-    f'{E_REVIEWS} ОТЗЫВЫ — @KrastuReviews\n\n'
+    '<tg-emoji emoji-id="5458908492687497206">💬</tg-emoji> ОТЗЫВЫ — @KrastuReviews\n\n'
 
-    f'{E_YOUTUBE} ЮТУБ — '
-    f'<a href="https://youtube.com/@napoleonpubg?si=VONw4qi1wNvpjTqP">ТЫК</a>'
-    f'{E_POINT}\n\n'
+    '<tg-emoji emoji-id="5334681713316479679">▶️</tg-emoji> ЮТУБ — '
+    '<a href="https://youtube.com/@napoleonpubg?si=VONw4qi1wNvpjTqP">ТЫК</a>'
+    '<tg-emoji emoji-id="5460795821576443427">👆</tg-emoji>\n\n'
 
-    f'{E_TIKTOK} ТИК ТОК — '
-    f'<a href="https://www.tiktok.com/@krastu_legend">ТЫК</a>'
-    f'{E_POINT}\n\n'
+    '<tg-emoji emoji-id="5327982530702359565">🎵</tg-emoji> ТИК ТОК — '
+    '<a href="https://www.tiktok.com/@krastu_legend">ТЫК</a>'
+    '<tg-emoji emoji-id="5460795821576443427">👆</tg-emoji>\n\n'
 
-    f'{E_LS} ЛС — @managernapoleona\n\n'
+    '<tg-emoji emoji-id="5456327792868220208">📩</tg-emoji> ЛС — @managernapoleona\n\n'
 
-    f'{E_LS} МЕНЕДЖЕР — @managernapoleona'
+    '<tg-emoji emoji-id="5456327792868220208">👤</tg-emoji> МЕНЕДЖЕР — @managernapoleona'
 )
 
 
